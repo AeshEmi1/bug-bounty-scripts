@@ -3,17 +3,22 @@ import argparse
 import sys
 import requests
 from requests.adapters import HTTPAdapter
-import dns.resolver
+import subprocess
+from concurrent.futures import ProcessPoolExecutor
 import socket
 
 parser = argparse.ArgumentParser(
     prog='akamai_debug.py',
-    description='Returns Akamai Debug Information'
+    description='Returns Akamai Debug information'
 )
 # Takes filename as a required positional argument
 parser.add_argument('filename_in')
 parser.add_argument('filename_out')
 args = parser.parse_args()
+valid_akamai_domains = set()
+dns_results: dict = {} # Dictionary of CNAMEs
+# my_resolver = Resolver()
+# my_resolver.nameservers = ['8.8.8.8', '1.1.1.1', '9.9.9.9']
 
 class FrontingAdapter(HTTPAdapter):
     """"Transport adapter" that allows us to use SSLv3."""
@@ -39,33 +44,27 @@ class FrontingAdapter(HTTPAdapter):
 
 def check_domain(hostname: str) -> bool:
     try:
+        socket.setdefaulttimeout(1)
         socket.gethostbyname(hostname)
         return True
     except socket.error:
         return False
 
-def name_resolution(domain, prod: bool) -> str:
+def name_resolution(domain, prod: bool) -> str|bool:
     """
-    Returns the edgekey domain for a domain.
+    Returns the edgekey CNAME for a domain.
     """
-    try:
-        cnames = dns.resolver.resolve(domain, "CNAME")
-    except:
-        if prod:
-            if check_domain(f"{domain}.edgekey.net"):
-                return f"{domain}.edgekey.net"
-            elif check_domain(f"{domain}.edgesuite.net"):
-                return f"{domain}.edgesuite.net"
-        else:
-            if check_domain(f"{domain}.edgekey-staging.net"):
-                return f"{domain}.edgekey-staging.net"
-            elif check_domain(f"{domain}.edgesuite-staging.net"):
-                return f"{domain}.edgesuite-staging.net"
-        return False
-
-    for cname in cnames:
-        # Convert CNAME to string
-        cname = str(cname)
+    # Cache DNS queries
+    if domain in dns_results.keys():
+        cname: str = dns_results[domain]
+    else:
+        try:
+            cname: str = subprocess.check_output(["dig", "+time=1", "+tries=2", domain, "CNAME", "+noall", "+short"]).decode('utf-8')
+            dns_results[domain]: str = cname
+        except:
+            cname: str = "FAIL"
+            dns_results[domain] = "FAIL"
+    if cname:
         # Check if CNAME is an akamai domain name
         if "edgekey-staging.net" in cname or "edgekey.net" in cname or "edgesuite.net" in cname or "edgesuite-staging.net" in cname:
             # If prod check that the domain is edgekey or staging, if not return a prod name
@@ -73,47 +72,76 @@ def name_resolution(domain, prod: bool) -> str:
                 if "edgekey.net" in cname or "edgesuite.net" in cname:
                     if cname[-1] == ".":
                         cname = cname[:-1]
+                    valid_akamai_domains.add(cname)
                     return cname
                 else:
-                    cname.replace("edgekey-staging.net", "edgekey.net")
-                    cname.replace("edgesuite-staging.net", "edgesuite.net")
+                    cname = cname.replace("edgekey-staging.net", "edgekey.net")
+                    cname = cname.replace("edgesuite-staging.net", "edgesuite.net")
                     if cname[-1] == ".":
                         cname = cname[:-1]
+                    valid_akamai_domains.add(cname)
                     return cname
             else:
                 if "edgekey-staging.net" in cname or "edgesuite-staging.net" in cname:
                     if cname[-1] == ".":
                         cname = cname[:-1]
+                    valid_akamai_domains.add(cname)
                     return cname
                 else:
-                    cname.replace("edgekey.net", "edgekey-staging.net")
-                    cname.replace("edgesuite.net", "edgesuite-staging.net")
+                    cname = cname.replace("edgekey.net", "edgekey-staging.net")
+                    cname = cname.replace("edgesuite.net", "edgesuite-staging.net")
                     if cname[-1] == ".":
                         cname = cname[:-1]
+                    valid_akamai_domains.add(cname)
                     return cname
+    else:
+        if prod:
+            if check_domain(f"{domain}.edgekey.net"):
+                valid_akamai_domains.add(f"{domain}.edgekey.net")
+                return f"{domain}.edgekey.net"
+            if check_domain(f"{domain}.edgesuite.net"):
+                valid_akamai_domains.add(f"{domain}.edgesuite.net")
+                return f"{domain}.edgesuite.net"
+        else:
+            if check_domain(f"{domain}.edgekey-staging.net"):
+                valid_akamai_domains.add(f"{domain}.edgekey-staging.net")
+                return f"{domain}.edgekey-staging.net"
+            elif check_domain(f"{domain}.edgesuite-staging.net"):
+                valid_akamai_domains.add(f"{domain}.edgesuite-staging.net")
+                return f"{domain}.edgesuite-staging.net"
+        # Test the actual domain without akamai stuff
+        if cname != "FAIL" and check_domain(domain):
+            return domain
+        return False
+
+    
 
 def create_session(domain: str) -> requests.Session:
     session = requests.Session()
-    session.mount('https://', FrontingAdapter(fronted_domain=domain))
+    # session.mount('https://', FrontingAdapter(fronted_domain=domain))
     session.headers = {
         "Host": domain,
-        "Pragma": "akamai-x-get-client-ip, akamai-x-cache-on, akamai-x-cache-remote-on, akamai-x-check-cacheable, akamai-x-get-cache-key, akamai-x-get-extracted-values, akamai-x-get-nonces, akamai-x-get-ssl-client-session-id, akamai-x-get-true-cache-key, akamai-x-serial-no, akamai-x-feo-trace, akamai-x-get-request-id, akamai-x-get-client-ip, akamai-x-ro-trace"
+        "Pragma": "akamai-x-get-client-ip, akamai-x-cache-on, akamai-x-cache-remote-on, akamai-x-check-cacheable, akamai-x-get-cache-key, akamai-x-get-extracted-values, akamai-x-get-nonces, akamai-x-get-ssl-client-session-id, akamai-x-get-true-cache-key, akamai-x-serial-no, akamai-x-feo-trace, akamai-x-get-request-id, akamai-x-get-client-ip, akamai-x-ro-trace",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:126.0) Gecko/20100101 Firefox/126.1"
     }
-    session.verify = False
+    # session.verify = False
     session.allow_redirects = False
     return session
    
-def parse_request(headers, domain: str, akamai_cdn_route: str, domain_fronting: bool|None = None) -> str:
+def parse_response(headers, domain: str, akamai_cdn_route: str, domain_fronting: bool|None = None) -> str:
     """
     Returns a parsed string of headers
     """
     response_str = ""
-    if not headers:
-        return f"[{domain} via {akamai_cdn_route}] Domain does not exist, unable to perform request..\n"
-    if domain_fronting:
-        head = f"[{domain} via {akamai_cdn_route}]"
-    else:
-        head = f"[{domain} via {akamai_cdn_route} - via HTTP (NO FRONTING)]"
+    if headers is False:
+        #return f"[{domain}] Domain does not exist, unable to perform request...\n"
+        return response_str
+    if headers is None:
+        return f"[{domain}] Domain exists, but unable to perform request...\n"
+    # if domain_fronting:
+    #     head = f"[{domain} via {akamai_cdn_route}]"
+    # else:
+    head = f"[{domain} via {akamai_cdn_route} - via HTTP]"
     if "X-Cache-Key" in headers:
         response_str = f"{response_str}{head} X-Cache-Key: {headers["X-Cache-Key"]}\n"
     if "X-True-Cache-Key" in headers:
@@ -130,12 +158,13 @@ def parse_request(headers, domain: str, akamai_cdn_route: str, domain_fronting: 
         response_str = f"{response_str}{head} X-Akamai-Pragma-Client-IP: {headers["X-Akamai-Pragma-Client-IP"]}\n"
     if not response_str:
         response_str = f"{head} Nothing Found.\n"
-    return response_str
+    return response_str+"\n\n"
     
 with open(args.filename_out, "w+") as output_file:
     with open(args.filename_in, "r") as akamai_domains:
         for akamai_domain in akamai_domains:
             akamai_domain = akamai_domain.lstrip().rstrip()
+            print(f"Current Domain: {akamai_domain}")
             session = create_session(akamai_domain)
             akamai_cdn_name_prod = name_resolution(akamai_domain, True)
             akamai_cdn_name_staging = name_resolution(akamai_domain, False)
@@ -148,30 +177,48 @@ with open(args.filename_out, "w+") as output_file:
 
             # Prod
             if not akamai_cdn_name_prod:
-                output_file.write(parse_request(False, akamai_domain, akamai_cdn_name_prod)+"\n\n")
+                output_file.write(parse_response(False, akamai_domain, akamai_cdn_name_prod))
             else:
+                # try:
+                #     response = session.get(f"https://{akamai_cdn_name_prod}")
+                #     print(akamai_cdn_name_prod)
+                #     output_file.write(parse_response(response.headers, akamai_domain, akamai_cdn_name_prod, True))
+                # except:
+                #     print(f"TLS ERROR for {akamai_domain} via {akamai_cdn_name_prod}! Continuing...\n\n")
+                #     output_file.write(f"TLS ERROR for {akamai_domain} via {akamai_cdn_name_prod}! Continuing...\n\n")
                 try:
-                    output_file.write(parse_request(session.get(f"https://{akamai_cdn_name_prod}").headers, akamai_domain, akamai_cdn_name_prod, True)+"\n\n")
-                except:
-                    print(f"TLS ERROR for {akamai_domain} via {akamai_cdn_name_prod}! Continuing...\n")
-                try:
-                    output_file.write(parse_request(requests.get(f"http://{akamai_cdn_name_prod}", headers=headers, allow_redirects=False).headers, akamai_domain, akamai_cdn_name_prod, False)+"\n\n")
-                except:
-                    # Other errors, like too many redirects...
-                    print(f"ERROR! {akamai_domain} via {akamai_cdn_name_prod} failed! Skipping...\n")
-                    output_file.write(f"ERROR! {akamai_domain} via {akamai_cdn_name_prod} failed! Skipping...\n\n")                       
+                    response = session.get(f"http://{akamai_cdn_name_prod}", timeout=3, allow_redirects=False)
+                    output_file.write(parse_response(response.headers, akamai_domain, akamai_cdn_name_prod, False))
+                except Exception as e:
+                    #output_file.write(f"ERROR! {akamai_domain} via {akamai_cdn_name_prod} Failed - {e}! Skipping...\n\n")
+                    pass
+                #     # Other errors...
+                #     print(f"ERROR! {akamai_domain} via {akamai_cdn_name_prod} failed! Skipping...\n\n")
+                #     output_file.write(f"ERROR! {akamai_domain} via {akamai_cdn_name_prod} failed! Skipping...\n\n")
 
             # Staging
             if not akamai_cdn_name_staging:
-                output_file.write(parse_request(False, akamai_domain, akamai_cdn_name_staging)+"\n\n")
+                output_file.write(parse_response(False, akamai_domain, akamai_cdn_name_staging))
+            elif akamai_cdn_name_prod == akamai_cdn_name_staging:
+                # Do nothing for when we use the regular domain (the cdn prod name and cdn staging name will be the same)
+                pass
             else:
+                # try:
+                #     response = session.get(f"https://{akamai_cdn_name_staging}")
+                #     output_file.write(parse_response(response.headers, akamai_domain, akamai_cdn_name_staging, True))
+                # except:
+                #     print(f"TLS ERROR for {akamai_domain} via {akamai_cdn_name_staging}! Continuing...\n\n")
+                #     output_file.write(f"TLS ERROR for {akamai_domain} via {akamai_cdn_name_staging}! Continuing...\n\n")
                 try:
-                    output_file.write(parse_request(session.get(f"https://{akamai_cdn_name_staging}").headers, akamai_domain, akamai_cdn_name_staging, True)+"\n\n")
-                except:
-                    print(f"TLS ERROR for {akamai_domain} via {akamai_cdn_name_staging}! Continuing...\n")
-                try:
-                    output_file.write(parse_request(requests.get(f"http://{akamai_cdn_name_staging}", headers=headers, allow_redirects=False).headers, akamai_domain, akamai_cdn_name_staging, False)+"\n\n")
-                except:
-                    # Other errors, like too many redirects...
-                    print(f"ERROR! {akamai_domain} via {akamai_cdn_name_staging} failed! Skipping...\n")
-                    output_file.write(f"ERROR! {akamai_domain} via {akamai_cdn_name_staging} failed! Skipping...\n\n")
+                    response = session.get(f"http://{akamai_cdn_name_staging}", timeout=3, allow_redirects=False)
+                    output_file.write(parse_response(response.headers, akamai_domain, akamai_cdn_name_staging, False))
+                except Exception as e:
+                    #output_file.write(f"ERROR! {akamai_domain} via {akamai_cdn_name_staging} Failed - {e}! Skipping...\n\n")
+                    pass
+                #     # Other errors...
+                #     print(f"ERROR! {akamai_domain} via {akamai_cdn_name_staging} failed! Skipping...\n\n")
+                #     output_file.write(f"ERROR! {akamai_domain} via {akamai_cdn_name_staging} failed! Skipping...\n\n")
+
+with open ("valid_akamai_domains.txt", "w+") as valid_domain_file:
+    for domain in valid_akamai_domains:
+        valid_domain_file.write(domain+"\n")
