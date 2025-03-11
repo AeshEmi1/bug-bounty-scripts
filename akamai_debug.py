@@ -19,7 +19,7 @@ valid_akamai_domains = set()
 dns_results: dict = {} # Dictionary of CNAMEs
 # my_resolver = Resolver()
 # my_resolver.nameservers = ['8.8.8.8', '1.1.1.1', '9.9.9.9']
-
+error_file = open("error_domains.txt", "w+")
 class FrontingAdapter(HTTPAdapter):
     """"Transport adapter" that allows us to use SSLv3."""
 
@@ -59,9 +59,10 @@ def name_resolution(domain, prod: bool) -> str|bool:
         cname: str = dns_results[domain]
     else:
         try:
-            cname: str = subprocess.check_output(["dig", "+time=1", "+tries=2", domain, "CNAME", "+noall", "+short"]).decode('utf-8')
+            cname: str = subprocess.check_output(["dig", "+time=1", "+tries=2", domain, "CNAME", "+noall", "+short"]).decode('utf-8').lstrip().rstrip()
             dns_results[domain]: str = cname
         except:
+            error_file.write(f"DIG failed for: {domain}\n")
             cname: str = "FAIL"
             dns_results[domain] = "FAIL"
     if cname:
@@ -222,3 +223,5 @@ with open(args.filename_out, "w+") as output_file:
 with open ("valid_akamai_domains.txt", "w+") as valid_domain_file:
     for domain in valid_akamai_domains:
         valid_domain_file.write(domain+"\n")
+
+error_file.close()
