@@ -144,11 +144,12 @@ def create_session(domain: str) -> requests.Session:
     return session
 
 
-def parse_response(headers, domain: str, akamai_cdn_route: str) -> str:
+def parse_response(headers, domain: str, akamai_cdn_route: str) -> tuple(str,bool):
     """
     Returns a parsed string of headers
     """
     response_str = ""
+    akamai_debug_headers_present = True
     if headers is False:
         #return f"[{domain}] Domain does not exist, unable to perform request...\n"
         return response_str
@@ -174,9 +175,10 @@ def parse_response(headers, domain: str, akamai_cdn_route: str) -> str:
         response_str = f"{response_str}{head} X-Akamai-Pragma-Client-IP: {headers["X-Akamai-Pragma-Client-IP"]}\n"
     if not response_str:
         response_str = f"{head} Nothing Found.\n"
+        akamai_debug_headers_present = False
     else:
         valid_akamai_domains.add(akamai_cdn_route)
-    return response_str+"\n\n"
+    return (response_str+"\n\n",akamai_debug_headers_present)
 
 
 output_file = open(args.filename_out, "w+")
@@ -198,23 +200,23 @@ with open(args.filename_in, "r") as akamai_domains:
 
         # Prod
         if not akamai_cdn_name_prod:
-            output_file.write(parse_response(False, akamai_domain, akamai_cdn_name_prod))
+            output_file.write(parse_response(False, akamai_domain, akamai_cdn_name_prod)[0])
         else:
             try:
                 response = session.get(f"http://{akamai_cdn_name_prod}", timeout=3, allow_redirects=False)
-                output_file.write(parse_response(response.headers, akamai_domain, akamai_cdn_name_prod))
+                output_file.write(parse_response(response.headers, akamai_domain, akamai_cdn_name_prod)[0])
             except Exception as e:
                 pass
         # Staging
         if not akamai_cdn_name_staging:
-            output_file.write(parse_response(False, akamai_domain, akamai_cdn_name_staging))
+            output_file.write(parse_response(False, akamai_domain, akamai_cdn_name_staging)[0])
         elif akamai_cdn_name_prod == akamai_cdn_name_staging:
             # Do nothing for when we use the regular domain (the cdn prod name and cdn staging name will be the same)
             pass
         else:
             try:
                 response = session.get(f"http://{akamai_cdn_name_staging}", timeout=3, allow_redirects=False)
-                output_file.write(parse_response(response.headers, akamai_domain, akamai_cdn_name_staging))
+                output_file.write(parse_response(response.headers, akamai_domain, akamai_cdn_name_staging)[0])
             except Exception as e:
                 pass
 
@@ -228,12 +230,10 @@ if args.brute_force:
         for valid_akamai_domain in valid_akamai_domains:
             session = create_session(unresolved_domain)
             response = session.get(f"http://{valid_akamai_domain}", timeout=3, allow_redirects=False)
-            if response.status_code == 404:
-                output_file.write(f"BRUTE FORCE 404 - {parse_response(response.headers, unresolved_domain, valid_akamai_domain)}")
-                break
-            elif response.status_code in range(400, 600):
+            parsed_response = parse_response(response.headers, unresolved_domain, valid_akamai_domain)[0]
+            if not parsed_response[1]:
                 continue
-            output_file.write(parse_response(response.headers, unresolved_domain, valid_akamai_domain))
+            output_file.write(parsed_response[0])
             break
 
 error_file.close()
