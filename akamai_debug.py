@@ -144,7 +144,7 @@ def create_session(domain: str) -> requests.Session:
     return session
 
 
-def parse_response(headers, domain: str, akamai_cdn_route: str) -> tuple(str,bool):
+def parse_response(headers, domain: str, akamai_cdn_route: str) -> tuple:
     """
     Returns a parsed string of headers
     """
@@ -152,9 +152,11 @@ def parse_response(headers, domain: str, akamai_cdn_route: str) -> tuple(str,boo
     akamai_debug_headers_present = True
     if headers is False:
         #return f"[{domain}] Domain does not exist, unable to perform request...\n"
-        return response_str
+        akamai_debug_headers_present = False
+        return (response_str, akamai_debug_headers_present)
     if headers is None:
-        return f"[{domain}] Domain exists, but unable to perform request...\n"
+        akamai_debug_headers_present = False
+        return (f"[{domain}] Domain exists, but unable to perform request...\n", akamai_debug_headers_present)
     # if domain_fronting:
     #     head = f"[{domain} via {akamai_cdn_route}]"
     # else:
@@ -178,7 +180,7 @@ def parse_response(headers, domain: str, akamai_cdn_route: str) -> tuple(str,boo
         akamai_debug_headers_present = False
     else:
         valid_akamai_domains.add(akamai_cdn_route)
-    return (response_str+"\n\n",akamai_debug_headers_present)
+    return (response_str+"\n\n", akamai_debug_headers_present)
 
 
 output_file = open(args.filename_out, "w+")
