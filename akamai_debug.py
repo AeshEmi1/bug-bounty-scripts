@@ -54,7 +54,7 @@ class FrontingAdapter(HTTPAdapter):
 
 def check_domain(hostname: str) -> bool:
     try:
-        socket.setdefaulttimeout(1)
+        socket.setdefaulttimeout(2)
         socket.gethostbyname(hostname)
         return True
     except socket.error:
@@ -205,9 +205,10 @@ with open(args.filename_in, "r") as akamai_domains:
             output_file.write(parse_response(False, akamai_domain, akamai_cdn_name_prod)[0])
         else:
             try:
-                response = session.get(f"http://{akamai_cdn_name_prod}", timeout=3, allow_redirects=False)
+                response = session.get(f"http://{akamai_cdn_name_prod}", timeout=5, allow_redirects=False)
                 output_file.write(parse_response(response.headers, akamai_domain, akamai_cdn_name_prod)[0])
             except Exception as e:
+                error_file.write(f"[{akamai_domain} via {akamai_cdn_name_prod}] - {e}\n")
                 pass
         # Staging
         if not akamai_cdn_name_staging:
@@ -217,9 +218,10 @@ with open(args.filename_in, "r") as akamai_domains:
             pass
         else:
             try:
-                response = session.get(f"http://{akamai_cdn_name_staging}", timeout=3, allow_redirects=False)
+                response = session.get(f"http://{akamai_cdn_name_staging}", timeout=5, allow_redirects=False)
                 output_file.write(parse_response(response.headers, akamai_domain, akamai_cdn_name_staging)[0])
             except Exception as e:
+                error_file.write(f"[{akamai_domain} via {akamai_cdn_name_staging}] - {e}\n")
                 pass
 
 
@@ -231,10 +233,11 @@ if args.brute_force:
     for unresolved_domain in unresolved_domains:
         for valid_akamai_domain in valid_akamai_domains:
             session = create_session(unresolved_domain)
-            response = session.get(f"http://{valid_akamai_domain}", timeout=3, allow_redirects=False)
-            parsed_response = parse_response(response.headers, unresolved_domain, valid_akamai_domain)[0]
+            response = session.get(f"http://{valid_akamai_domain}", timeout=5, allow_redirects=False)
+            parsed_response = parse_response(response.headers, unresolved_domain, valid_akamai_domain)
             if not parsed_response[1]:
                 continue
+            print(parsed_response[0])
             output_file.write(parsed_response[0])
             break
 
