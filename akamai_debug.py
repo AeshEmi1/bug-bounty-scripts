@@ -6,6 +6,7 @@ from requests.adapters import HTTPAdapter
 import subprocess
 from concurrent.futures import ProcessPoolExecutor
 import socket
+import random
 
 parser = argparse.ArgumentParser(
     prog='akamai_debug.py',
@@ -70,7 +71,7 @@ def name_resolution(domain, prod: bool) -> str|bool:
         cname: str = dns_results[domain]
     else:
         try:
-            cname: str = subprocess.check_output(["dig", "+time=1", "+tries=2", domain, "CNAME", "+noall", "+short"]).decode('utf-8').lstrip().rstrip()
+            cname: str = subprocess.check_output(["dig", "+time=1", "+tries=2", domain, "CNAME", "+noall", "+short"]).decode('utf-8').lstrip().rstrip().lower()
             dns_results[domain]: str = cname
         except:
             error_file.write(f"DIG failed for: {domain}\n")
@@ -230,16 +231,18 @@ with open (valid_akamai_domains_file, "w+") as valid_domain_file:
         valid_domain_file.write(domain+"\n")
 
 if args.brute_force:
-    for unresolved_domain in unresolved_domains:
-        for valid_akamai_domain in valid_akamai_domains:
-            session = create_session(unresolved_domain)
-            response = session.get(f"http://{valid_akamai_domain}", timeout=5, allow_redirects=False)
-            parsed_response = parse_response(response.headers, unresolved_domain, valid_akamai_domain)
-            if not parsed_response[1]:
-                continue
-            print(parsed_response[0])
-            output_file.write(parsed_response[0])
-            break
+    if valid_akamai_domains is not None:
+        if len(valid_akamai_domains) > 10:
+            valid_akamai_domains = random.sample(valid_akamai_domains, 10) 
+        for unresolved_domain in unresolved_domains:
+            for valid_akamai_domain in valid_akamai_domains:
+                session = create_session(unresolved_domain)
+                response = session.get(f"http://{valid_akamai_domain}", timeout=5, allow_redirects=False)
+                parsed_response = parse_response(response.headers, unresolved_domain, valid_akamai_domain)
+                if not parsed_response[1]:
+                    continue
+                output_file.write(parsed_response[0])
+                break
 
 error_file.close()
 output_file.close()
