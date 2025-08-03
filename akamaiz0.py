@@ -161,7 +161,9 @@ class ContentParsers:
             for domain in domain_and_header_dict:
                 if domain_and_header_dict[domain]["custom_header_dict"]:
                     route = domain_and_header_dict[domain]["route"]
-                    for header_name, header_value in domain_and_header_dict[domain]["custom_header_dict"].items():
+                    for header_name, header_value in domain_and_header_dict[domain][
+                        "custom_header_dict"
+                    ].items():
                         custom_header_file.write(
                             f"[{domain} via {route}] {header_name}: {header_value}\n"
                         )
