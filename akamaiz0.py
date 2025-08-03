@@ -43,7 +43,7 @@ class AkamaiZ0:
 
     @staticmethod
     def get_custom_headers(
-        original_domain: str, domain: str = None, custom_headers: dict[str, dict] = {}
+        original_domain: str, domain: str = None, custom_headers: dict[str, dict] = None
     ) -> dict | None:
         """Tries to get custom headers (including Akamai pragma headers) from a domain
 
@@ -62,10 +62,10 @@ class AkamaiZ0:
 
         if not domain:
             domain = original_domain
-        if "route" not in custom_headers:
+        if not custom_headers:
+            custom_headers: dict[str, str] = {}
             custom_headers["route"]: str = ""
-        if "custom_header_dict" not in custom_headers:
-            custom_headers["custom_header_dict"]: dict = {}
+            custom_headers["custom_header_dict"]: dict[str, str] = {}
 
         # Checks that the domain is valid before updaing the custom_headers dict
         if DNSHelpers.check_domain(domain):
@@ -83,7 +83,7 @@ class AkamaiZ0:
                 )
                 cname = DNSHelpers.get_cname(domain)
                 if cname:
-                    custom_headers["route"] = DNSHelpers.get_cname(domain)
+                    custom_headers["route"] = cname
                 else:
                     custom_headers["route"] = DNSHelpers.get_A(domain)
 
@@ -160,11 +160,10 @@ class ContentParsers:
         with open(file_name, "w") as custom_header_file:
             for domain in domain_and_header_dict:
                 if domain_and_header_dict[domain]["custom_header_dict"]:
-                    for header_name in domain_and_header_dict[domain][
-                        "custom_header_dict"
-                    ]:
+                    route = domain_and_header_dict[domain]["route"]
+                    for header_name, header_value in domain_and_header_dict[domain]["custom_header_dict"].items():
                         custom_header_file.write(
-                            f"[{domain} via {domain_and_header_dict[domain]["route"]}] {header_name}: {domain_and_header_dict[domain]["custom_header_dict"][header_name]}\n"
+                            f"[{domain} via {route}] {header_name}: {header_value}\n"
                         )
 
 
@@ -179,7 +178,7 @@ def get_custom_headers_from_file(domain_file: str, output_file: str) -> None:
     with open(domain_file, "r") as domains:
         for domain in domains:
             domain = domain.strip()
-            logger.info("Getting custom headers", domain=domain)
+            logger.info("Getting custom headers...", domain=domain)
             domain_and_header_dict[domain] = AkamaiZ0.get_custom_headers(domain)
 
     ContentParsers.parse_custom_headers(domain_and_header_dict, output_file)
