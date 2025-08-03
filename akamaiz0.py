@@ -267,11 +267,12 @@ def get_custom_headers_from_file(
     origin_dict = ContentParsers.get_potential_origins(domain_and_header_dict)
     if origin_dict:
         with open(origin_outfile, "w") as potential_origin_file:
+            other_domains = []
             for potential_origin in origin_dict:
                 # Checks that the origin and the visible domain are not the same when the number of visible names to potential origins is 1.
                 if not (
                     len(origin_dict[potential_origin]) == 1
-                    and potential_origin == origin_dict[potential_origin][0]
+                    and potential_origin == origin_dict[potential_origin][0].split(" ")[0]
                 ):
                     potential_origin_file.write(
                         f"Potential origin: {potential_origin}\n"
@@ -279,7 +280,15 @@ def get_custom_headers_from_file(
                     for main_domain in origin_dict[potential_origin]:
                         potential_origin_file.write(f"- {main_domain}\n")
                     potential_origin_file.write("\n")
-        logger.info("File written successfully!", file=potential_origin_file)
+                else:
+                    # For domains that's Cache key is the same as the incoming host header instead of the origin server add it to a list for those to be parsed separately.
+                    other_domains.extend(origin_dict[potential_origin])
+
+            if other_domains:
+                potential_origin_file.write("Other domains:\n")
+                for other_domain in other_domains:
+                    potential_origin_file.write(f"- {other_domain}\n")
+        logger.info("File written successfully!", file=origin_outfile)
     else:
         logger.info("No potential origins :(")
 
