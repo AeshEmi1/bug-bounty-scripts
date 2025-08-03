@@ -5,6 +5,7 @@ import tldextract
 import structlog
 import argparse
 import http.client
+import re
 
 # To avoid running into 100 header limit
 http.client._MAXHEADERS = 1000
@@ -168,8 +169,54 @@ class ContentParsers:
                             f"[{domain} via {route}] {header_name}: {header_value}\n"
                         )
 
+    @staticmethod
+    def get_potential_origins(domain_and_header_dict: dict[str, list]) -> dict:
+        """Tries to get custom origins and writes them to a dict.
 
-def get_custom_headers_from_file(domain_file: str, output_file: str) -> None:
+        Args:
+            domain_and_header_dict (dict): Contains the domain and route
+                {"lululemon.fr": {"route": "lululemon.fr.edgekey.net", "custom_header_dict": {"header1": "stuff"}}}
+        
+        Returns:
+            dict: Potential origins
+                {"potential_origin.example.com": ["main_domain.example.com", "example.com"]}
+        """
+
+        origin_dict: dict[str, list] = {}
+        for domain in domain_and_header_dict:
+            if "X-Cache-Key" in domain_and_header_dict[domain]["custom_header_dict"]:
+                potential_origin = domain_and_header_dict[domain]["custom_header_dict"]["X-Cache-Key"].split("/")[5]
+                if potential_origin not in origin_dict:
+                    origin_dict[potential_origin] = []
+                attributes = []
+                try:
+                    property_name: str = re.search(r'name=AKA_PM_PROPERTY_NAME;\s*value=([^,;]*)', domain_and_header_dict[domain]["custom_header_dict"]["X-Akamai-Session-Info"])
+                    attributes.append(f"AKA_PM_PROPERTY_NAME={property_name.group(1)}")
+                except:
+                    pass
+                try:
+                    property_version: str = re.search(r'name=AKA_PM_PROPERTY_VERSION;\s*value=([^,;]*)', domain_and_header_dict[domain]["custom_header_dict"]["X-Akamai-Session-Info"])
+                    attributes.append(f"AKA_PM_PROPERTY_VERSION={property_version.group(1)}")
+                except:
+                    pass
+                try:
+                    custom_variables: dict[str, str] = re.findall(r'(name=PMUSER[^;,\s]*); value=([^,;]*)', domain_and_header_dict[domain]["custom_header_dict"]["X-Akamai-Session-Info"])
+                    for key, value in custom_variables:
+                        # Remove the name= prefix from the key
+                        cleaned_key = key.replace('name=', '')
+                        attributes.append(f"{cleaned_key}={value}")
+                except:
+                    pass
+                try:
+                    datastream_status: str = re.search(r'name=DATASTREAM_LOGGING_EXECUTED;\s*value=([^,;]*)', domain_and_header_dict[domain]["custom_header_dict"]["X-Akamai-Session-Info"])
+                    attributes.append(f"DATASTREAM_LOGGING_EXECUTED={datastream_status.group(1)}")
+                except:
+                    pass
+                origin_dict[potential_origin].append(f"{domain} {[attribute for attribute in attributes]}")
+        
+        return origin_dict
+
+def get_custom_headers_from_file(domain_file: str, header_output_file: str, origin_outfile: str) -> None:
     """Retrieves custom headers
 
     Args:
@@ -183,8 +230,22 @@ def get_custom_headers_from_file(domain_file: str, output_file: str) -> None:
             logger.info("Getting custom headers...", domain=domain)
             domain_and_header_dict[domain] = AkamaiZ0.get_custom_headers(domain)
 
-    ContentParsers.parse_custom_headers(domain_and_header_dict, output_file)
-
+    ContentParsers.parse_custom_headers(domain_and_header_dict, header_output_file)
+    logger.info("File written successfully!", file=custom_headers_file)
+        
+    origin_dict = ContentParsers.get_potential_origins(domain_and_header_dict)
+    if origin_dict:
+        with open(origin_outfile, "w") as potential_origin_file:
+            for potential_origin in origin_dict:
+                # Checks that the origin and the visible domain are not the same when the number of visible names to potential origins is 1.
+                if not (len(origin_dict[potential_origin]) == 1 and potential_origin == origin_dict[potential_origin][0]):
+                    potential_origin_file.write(f"Potential origin: {potential_origin}\n")
+                    for main_domain in origin_dict[potential_origin]:
+                        potential_origin_file.write(f"- {main_domain}\n")
+                    potential_origin_file.write("\n")
+        logger.info("File written successfully!", file=potential_origin_file)
+    else:
+        logger.info("No potential origins :(")
 
 if __name__ == "__main__":
     try:
@@ -201,6 +262,10 @@ if __name__ == "__main__":
             "--ch",
             help="Specify output filename for the custom headers file, optional.",
         )
+        parser.add_argument(
+            "--origin_outfile",
+            help="Specify output filename for the potential origins, optional.",
+        )
         args = parser.parse_args()
 
         if args.ch:
@@ -208,7 +273,11 @@ if __name__ == "__main__":
         else:
             custom_headers_file = "custom_headers.txt"
 
-        get_custom_headers_from_file(args.domains_file, custom_headers_file)
-        logger.info("File written successfully!", file=custom_headers_file)
+        if args.origin_outfile:
+            potential_origin_file = args.origin_outfile
+        else:
+            potential_origin_file = "potential_origins.txt"
+
+        get_custom_headers_from_file(args.domains_file, custom_headers_file, potential_origin_file)
     except:
         logger.critical("A critical error has occured", exc_info=True)
