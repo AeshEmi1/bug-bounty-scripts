@@ -272,7 +272,8 @@ def get_custom_headers_from_file(
                 # Checks that the origin and the visible domain are not the same when the number of visible names to potential origins is 1.
                 if not (
                     len(origin_dict[potential_origin]) == 1
-                    and potential_origin == origin_dict[potential_origin][0].split(" ")[0]
+                    and potential_origin
+                    == origin_dict[potential_origin][0].split(" ")[0]
                 ):
                     potential_origin_file.write(
                         f"Potential origin: {potential_origin}\n"
