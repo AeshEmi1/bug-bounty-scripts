@@ -11,7 +11,6 @@ def configure_logging(log_file_path: str = None, log_level=logging.INFO):
         structlog.stdlib.add_logger_name,
         structlog.stdlib.add_log_level,
         structlog.processors.TimeStamper(fmt="%Y-%m-%d %H:%M:%S", utc=False),
-        structlog.processors.format_exc_info,
     ]
 
     # This configures the standard logging handlers.

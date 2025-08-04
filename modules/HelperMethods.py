@@ -15,14 +15,15 @@ class HTTPHelpers:
 
         Args:
             url (str): URL the request will be sent to.
-            headers (dict, optional):HTTP Headers to be added to the request. Defaults to None
+            headers (dict, optional): HTTP Headers to be added to the request. Defaults to None
 
         Returns:
             requests.Response: Returns the GET request response from the server
         """
+
         try:
             request = requests.get(url, headers=headers, allow_redirects=False)
-            logger.info("Request made", url=url, status_code=request.status_code)
+            #logger.info("Request made", url=url, status_code=request.status_code)
             return request
         except:
             logger.error("Request failed", url=url, exc_info=True)
@@ -60,8 +61,7 @@ class DNSHelpers:
                     ["dig", "+time=1", "+tries=2", domain, "CNAME", "+noall", "+short"]
                 )
                 .decode("utf-8")
-                .lstrip()
-                .rstrip()
+                .strip()
                 .lower()
             )
             return cname
@@ -80,15 +80,16 @@ class DNSHelpers:
         """
 
         try:
-            cname: str = (
+            a: str = (
                 subprocess.check_output(
                     ["dig", "+time=1", "+tries=2", domain, "+noall", "+short"]
                 )
                 .decode("utf-8")
                 .strip()
                 .lower()
+                .split("\n")[-1]
             )
-            return cname
+            return a
         except:
             logger.error(f"DIG failed", domain=domain, exc_info=True)
             return False
