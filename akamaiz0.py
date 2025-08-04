@@ -44,7 +44,9 @@ class AkamaiZ0:
 
     @staticmethod
     def get_custom_headers(
-        original_domain: str, domain: str = None, custom_headers: dict[str, str | dict | int] = None
+        original_domain: str,
+        domain: str = None,
+        custom_headers: dict[str, str | dict | int] = None,
     ) -> dict | None:
         """Tries to get custom headers (including Akamai pragma headers) from a domain
 
@@ -77,9 +79,9 @@ class AkamaiZ0:
             # Try HTTPS instead if the request fails
             if get_request is False:
                 get_request = HTTPHelpers.get_request(
-                f"https://{domain}/favicon.ico", request_headers
-            )
-            
+                    f"https://{domain}/favicon.ico", request_headers
+                )
+
             if get_request is not None:
                 custom_headers["status_code"] = get_request.status_code
                 custom_headers["custom_header_dict"].update(
@@ -178,13 +180,11 @@ class ContentParsers:
                             f"[{domain} via {route} ({status_code})] {header_name}: {header_value}\n"
                         )
                 elif "status_code" not in domain_and_header_dict[domain]:
-                        custom_header_file.write(
-                            f"[{domain}] - Returned an error!\n"
-                        )
+                    custom_header_file.write(f"[{domain}] - Returned an error!\n")
                 elif domain_and_header_dict[domain]["status_code"] == 403:
-                        custom_header_file.write(
-                            f"[{domain} via {route} ({status_code})] - No custom headers, but {status_code} returned...\n"
-                        )
+                    custom_header_file.write(
+                        f"[{domain} via {route} ({status_code})] - No custom headers, but {status_code} returned...\n"
+                    )
 
     @staticmethod
     def get_potential_origins(domain_and_header_dict: dict[str, list]) -> dict:
@@ -206,7 +206,9 @@ class ContentParsers:
                     "X-Cache-Key"
                 ].split("/")[5]
                 if DNSHelpers.get_A(potential_origin):
-                    potential_origin = f"{potential_origin} ({DNSHelpers.get_A(potential_origin)})"
+                    potential_origin = (
+                        f"{potential_origin} ({DNSHelpers.get_A(potential_origin)})"
+                    )
                 if potential_origin not in origin_dict:
                     origin_dict[potential_origin] = []
                 attributes = []
@@ -262,6 +264,7 @@ class ContentParsers:
                 )
 
         return origin_dict
+
 
 def get_custom_headers_from_file(
     domain_file: str, header_output_file: str, origin_outfile: str
