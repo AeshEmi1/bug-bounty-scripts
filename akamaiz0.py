@@ -44,7 +44,7 @@ class AkamaiZ0:
 
     @staticmethod
     def get_custom_headers(
-        original_domain: str, domain: str = None, custom_headers: dict[str, dict] = None
+        original_domain: str, domain: str = None, custom_headers: dict[str, str | dict | int] = None
     ) -> dict | None:
         """Tries to get custom headers (including Akamai pragma headers) from a domain
 
@@ -53,7 +53,7 @@ class AkamaiZ0:
 
         Returns:
             dict[str, str]: The returned domain route and custom headers, or None if none were returned.
-                {"route": "lululemon.fr.edgekey.net", "custom_header_dict": {"header1": "stuff"}}
+                {"route": "lululemon.fr.edgekey.net", "custom_header_dict": {"header1": "stuff"}, "status_code": 200}
         """
         request_headers = {
             "Host": original_domain,
@@ -73,7 +73,15 @@ class AkamaiZ0:
             get_request = HTTPHelpers.get_request(
                 f"http://{domain}/favicon.ico", request_headers
             )
-            if get_request:
+
+            # Try HTTPS instead if the request fails
+            if get_request is False:
+                get_request = HTTPHelpers.get_request(
+                f"https://{domain}/favicon.ico", request_headers
+            )
+            
+            if get_request is not None:
+                custom_headers["status_code"] = get_request.status_code
                 custom_headers["custom_header_dict"].update(
                     {
                         header_name: header_value
@@ -155,18 +163,27 @@ class ContentParsers:
 
         Args:
             domain_and_header_dict (dict): Contains the domain and route
-                {"lululemon.fr": {"route": "lululemon.fr.edgekey.net", "custom_header_dict": {"header1": "stuff"}}}
+                {"lululemon.fr": {"route": "lululemon.fr.edgekey.net", "custom_header_dict": {"header1": "stuff"}, "status_code": 200}}
         """
 
         with open(file_name, "w") as custom_header_file:
             for domain in domain_and_header_dict:
                 if domain_and_header_dict[domain]["custom_header_dict"]:
                     route = domain_and_header_dict[domain]["route"]
+                    status_code = domain_and_header_dict[domain]["status_code"]
                     for header_name, header_value in domain_and_header_dict[domain][
                         "custom_header_dict"
                     ].items():
                         custom_header_file.write(
-                            f"[{domain} via {route}] {header_name}: {header_value}\n"
+                            f"[{domain} via {route} ({status_code})] {header_name}: {header_value}\n"
+                        )
+                elif "status_code" not in domain_and_header_dict[domain]:
+                        custom_header_file.write(
+                            f"[{domain}] - Returned an error!\n"
+                        )
+                elif domain_and_header_dict[domain]["status_code"] == 403:
+                        custom_header_file.write(
+                            f"[{domain} via {route} ({status_code})] - No custom headers, but {status_code} returned...\n"
                         )
 
     @staticmethod
@@ -174,8 +191,8 @@ class ContentParsers:
         """Tries to get custom origins and writes them to a dict.
 
         Args:
-            domain_and_header_dict (dict): Contains the domain and route
-                {"lululemon.fr": {"route": "lululemon.fr.edgekey.net", "custom_header_dict": {"header1": "stuff"}}}
+            domain_and_header_dict (dict): Contains the domain, route and status_code
+                {"lululemon.fr": {"route": "lululemon.fr.edgekey.net", "custom_header_dict": {"header1": "stuff"}, "status_code": 200}}
 
         Returns:
             dict: Potential origins
@@ -188,6 +205,8 @@ class ContentParsers:
                 potential_origin = domain_and_header_dict[domain]["custom_header_dict"][
                     "X-Cache-Key"
                 ].split("/")[5]
+                if DNSHelpers.get_A(potential_origin):
+                    potential_origin = f"{potential_origin} ({DNSHelpers.get_A(potential_origin)})"
                 if potential_origin not in origin_dict:
                     origin_dict[potential_origin] = []
                 attributes = []
@@ -244,7 +263,6 @@ class ContentParsers:
 
         return origin_dict
 
-
 def get_custom_headers_from_file(
     domain_file: str, header_output_file: str, origin_outfile: str
 ) -> None:
@@ -272,7 +290,7 @@ def get_custom_headers_from_file(
                 # Checks that the origin and the visible domain are not the same when the number of visible names to potential origins is 1.
                 if not (
                     len(origin_dict[potential_origin]) == 1
-                    and potential_origin
+                    and potential_origin.split(" ")[0]
                     == origin_dict[potential_origin][0].split(" ")[0]
                 ):
                     potential_origin_file.write(
