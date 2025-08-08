@@ -1,8 +1,16 @@
-#!/usr/bin/env python3
-import sys, argparse, requests, json
+"""
+Gets certificate info for a domain and it's subdomains.
+"""
 
-subdomains = set()
-wildcardsubdomains = set()
+#!/usr/bin/env python3
+import sys
+import argparse
+import json
+import structlog
+import requests
+from logging_settings import configure_logging
+
+logger = structlog.get_logger(__name__)
 
 
 def parser_error(errmsg):
@@ -16,7 +24,6 @@ def parse_args():
         epilog="\tExample: \r\npython3 " + sys.argv[0] + " -d google.com"
     )
     parser.error = parser_error
-    parser._optionals.title = "OPTIONS"
     parser.add_argument(
         "-d",
         "--domain",
@@ -46,58 +53,65 @@ def parse_args():
         action="store_true",
         required=False,
     )
-    parser.add_argument(
-        "-s", "--stdout", help="Print output", action="store_true", required=False
-    )
     return parser.parse_args()
 
 
-def crtsh(domain: str):
+def crtsh(root_domain: str) -> dict(str, set):
+    """Retrieves domains from the crt.sh output
+
+    Args:
+        root_domain (str): The root domain to get all certificates for
+
+    Returns:
+        dict(str, set): A dict of found subdomains from certificate info
     """
-    Returns a set of domains.
-    """
+    subdomains = set()
+    wildcardsubdomains = set()
+
     try:
         response = requests.get(
-            f"https://crt.sh/?q={domain.lstrip().rstrip()}&output=json", timeout=25
+            f"https://crt.sh/?q={root_domain.lstrip().rstrip()}&output=json", timeout=25
         )
         if response.ok:
             content = response.content.decode("UTF-8")
-            jsondata = json.loads(content)
-            for i in range(len(jsondata)):
-                name_value = jsondata[i]["name_value"]
+            subdomain_data = json.loads(content)
+            for subdomain in subdomain_data:
+                name_value = subdomain["name_value"]
                 if name_value.find("\n"):
                     subname_value = name_value.split("\n")
-                    for subname_value in subname_value:
-                        if subname_value.find("*"):
-                            subdomains.add(subname_value)
+                    for subdomain in subname_value:
+                        if "*" in subdomain:
+                            wildcardsubdomains.add(subdomain)
                         else:
-                            wildcardsubdomains.add(subname_value)
+                            subdomains.add(subdomain)
         else:
-            print(f"ERROR! RESPONSE: {response.json()}")
-    except:
-        print("ERROR! Timeout Exceeded.")
-        pass
+            logger.error(f"RESPONSE: {response.json()}")
+    except Exception:
+        logger.error("ERROR! Timeout Exceeded.")
+    return {"subdomains": subdomains, "wildcards": wildcardsubdomains}
 
 
 if __name__ == "__main__":
+    configure_logging(log_file_path="crtsh.log")
     args = parse_args()
     if args.output_file:
-        output_file = open(args.output_file, "w+")
+        output_file = open(args.output_file, "w+", encoding="utf-8")
     if args.domain:
-        crtsh(args.domain)
+        crtsh_dict = crtsh(args.domain)
         # Check that there are actually subdomains to iterate through
-        if subdomains:
-            for subdomain in subdomains:
+        if crtsh_dict["subdomains"]:
+            for subdomain in crtsh_dict["subdomains"]:
                 if args.output_file:
                     output_file.write(f"{subdomain}\n")
                 print(subdomain)
     elif args.domain_file:
-        with open(args.domain_file, "r") as domain_file:
+        all_subdomains: set = set()
+        with open(args.domain_file, "r", encoding="utf-8") as domain_file:
             for domain in domain_file:
-                crtsh_output = crtsh(domain)
+                all_subdomains.add(crtsh(domain)["subdomains"])
         # Check that there are actually subdomains to iterate through
-        if subdomains:
-            for subdomain in subdomains:
+        if all_subdomains:
+            for subdomain in all_subdomains:
                 if args.output_file:
                     output_file.write(f"{subdomain}\n")
                 print(subdomain)

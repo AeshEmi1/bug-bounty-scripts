@@ -1,11 +1,20 @@
+"""
+Attempts to find origin servers using various methods.
+
+Current methods include:
+- Akamai Pragma Header enumeration
+- Subdomain enumeration
+- Certificate enumeration
+"""
+
 #!/usr/bin/python3
-from logging_settings import configure_logging
-from modules.HelperMethods import HTTPHelpers, DNSHelpers
-import tldextract
-import structlog
 import argparse
 import http.client
 import re
+import tldextract
+import structlog
+from logging_settings import configure_logging
+from modules.HelperMethods import HTTPHelpers, DNSHelpers
 
 # To avoid running into 100 header limit
 http.client._MAXHEADERS = 1000
@@ -168,7 +177,7 @@ class ContentParsers:
                 {"lululemon.fr": {"route": "lululemon.fr.edgekey.net", "custom_header_dict": {"header1": "stuff"}, "status_code": 200}}
         """
 
-        with open(file_name, "w") as custom_header_file:
+        with open(file_name, "w", encoding="utf-8") as custom_header_file:
             for domain in domain_and_header_dict:
                 if domain_and_header_dict[domain]["custom_header_dict"]:
                     route = domain_and_header_dict[domain]["route"]
@@ -220,7 +229,7 @@ class ContentParsers:
                         ],
                     )
                     attributes.append(f"AKA_PM_PROPERTY_NAME={property_name.group(1)}")
-                except:
+                except KeyError:
                     pass
                 try:
                     property_version: str = re.search(
@@ -232,7 +241,7 @@ class ContentParsers:
                     attributes.append(
                         f"AKA_PM_PROPERTY_VERSION={property_version.group(1)}"
                     )
-                except:
+                except KeyError:
                     pass
                 try:
                     custom_variables: dict[str, str] = re.findall(
@@ -245,7 +254,7 @@ class ContentParsers:
                         # Remove the name= prefix from the key
                         cleaned_key = key.replace("name=", "")
                         attributes.append(f"{cleaned_key}={value}")
-                except:
+                except KeyError:
                     pass
                 try:
                     datastream_status: str = re.search(
@@ -257,7 +266,7 @@ class ContentParsers:
                     attributes.append(
                         f"DATASTREAM_LOGGING_EXECUTED={datastream_status.group(1)}"
                     )
-                except:
+                except KeyError:
                     pass
                 origin_dict[potential_origin].append(
                     f"{domain} {[attribute for attribute in attributes]}"
@@ -276,35 +285,34 @@ def get_custom_headers_from_file(
     """
 
     domain_and_header_dict = {}
-    with open(domain_file, "r") as domains:
+    with open(domain_file, "r", encoding="utf-8") as domains:
         for domain in domains:
             domain = domain.strip()
             logger.info("Getting custom headers...", domain=domain)
             domain_and_header_dict[domain] = AkamaiZ0.get_custom_headers(domain)
 
     ContentParsers.parse_custom_headers(domain_and_header_dict, header_output_file)
-    logger.info("File written successfully!", file=custom_headers_file)
+    logger.info("File written successfully!", file=header_output_file)
 
     origin_dict = ContentParsers.get_potential_origins(domain_and_header_dict)
     if origin_dict:
-        with open(origin_outfile, "w") as potential_origin_file:
+        with open(origin_outfile, "w", encoding="utf-8") as potential_origin_file:
             other_domains = []
-            for potential_origin in origin_dict:
+            for potential_origin, edge_domains in origin_dict.items():
                 # Checks that the origin and the visible domain are not the same when the number of visible names to potential origins is 1.
                 if not (
-                    len(origin_dict[potential_origin]) == 1
-                    and potential_origin.split(" ")[0]
-                    == origin_dict[potential_origin][0].split(" ")[0]
+                    len(edge_domains) == 1
+                    and potential_origin.split(" ")[0] == edge_domains[0].split(" ")[0]
                 ):
                     potential_origin_file.write(
                         f"Potential origin: {potential_origin}\n"
                     )
-                    for main_domain in origin_dict[potential_origin]:
+                    for main_domain in edge_domains:
                         potential_origin_file.write(f"- {main_domain}\n")
                     potential_origin_file.write("\n")
                 else:
                     # For domains that's Cache key is the same as the incoming host header instead of the origin server add it to a list for those to be parsed separately.
-                    other_domains.extend(origin_dict[potential_origin])
+                    other_domains.extend(edge_domains)
 
             if other_domains:
                 potential_origin_file.write("Other domains:\n")
@@ -317,11 +325,11 @@ def get_custom_headers_from_file(
 
 if __name__ == "__main__":
     try:
-        configure_logging(log_file_path="akamaiz0.log")
+        configure_logging(log_file_path="find_origins.log")
 
         parser = argparse.ArgumentParser(
-            prog="akamaiz0.py",
-            description="Exploits for insecure Akamai implementations",
+            prog="find_origins.py",
+            description="Script that attempts to find origins from a domain(s).",
         )
         parser.add_argument(
             "domains_file", help="Specify filename with domains to be scanned."
@@ -342,12 +350,12 @@ if __name__ == "__main__":
             custom_headers_file = "custom_headers.txt"
 
         if args.origin_outfile:
-            potential_origin_file = args.origin_outfile
+            potential_origins_file = args.origin_outfile
         else:
-            potential_origin_file = "potential_origins.txt"
+            potential_origins_file = "potential_origins.txt"
 
         get_custom_headers_from_file(
-            args.domains_file, custom_headers_file, potential_origin_file
+            args.domains_file, custom_headers_file, potential_origins_file
         )
-    except:
+    except Exception:
         logger.critical("A critical error has occured", exc_info=True)
