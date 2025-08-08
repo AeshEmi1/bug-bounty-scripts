@@ -53,9 +53,6 @@ def parse_args():
         action="store_true",
         required=False,
     )
-    parser.add_argument(
-        "-s", "--stdout", help="Print output", action="store_true", required=False
-    )
     return parser.parse_args()
 
 

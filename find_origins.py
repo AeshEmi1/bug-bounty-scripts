@@ -328,8 +328,8 @@ if __name__ == "__main__":
         configure_logging(log_file_path="find_origins.log")
 
         parser = argparse.ArgumentParser(
-            prog="akamaiz0.py",
-            description="Exploits for insecure Akamai implementations",
+            prog="find_origins.py",
+            description="Script that attempts to find origins from a domain(s).",
         )
         parser.add_argument(
             "domains_file", help="Specify filename with domains to be scanned."
